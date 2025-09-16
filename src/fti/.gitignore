@@ -1,0 +1,16 @@
+*.pickle
+*.png
+*.ipynb
+*.pyc
+*.csv
+.vscode
+Benchmark-Labeled-Data
+doduo
+models
+sessions
+noised
+figures
+
+semantic_types.json
+japanese.txt
+japanese_datetime_test.py
