@@ -2,6 +2,11 @@
 
 ## Getting Started
 
+### Sample Datasets Download
+Please download the datasets from the released zip file, and extract the zip file.
+
+### Environment Setup
+
 ```bash
 uv sync
 . .venv/bin/activate
