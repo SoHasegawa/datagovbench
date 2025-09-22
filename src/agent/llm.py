@@ -48,9 +48,10 @@ class LLM:
                 self.model, self.tokenizer = self._llm_initialize(method)
             self.multimodal = multimodal
         else:
-            self.api_key = os.environ.get("AZURE_OPENAI_API_KEY")
+            self.azure_api_key = os.environ.get("AZURE_OPENAI_API_KEY")
             self.gpt4_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
             self.gpt4_mini_endpoint = os.environ.get("AZURE_OPENAI_MINI_ENDPOINT")
+            self.gemini_api_key = os.environ.get("GEMINI_API_KEY")
             self.gemini_endpoint = os.environ.get("GEMINI_ENDPOINT")
             self.gemini_pro_endpoint = os.environ.get("GEMINI_PRO_ENDPOINT")
 
@@ -370,7 +371,7 @@ class LLM:
         indices = []
 
         for _ in range(1):
-            response = self._execute(message, 0, self.api_key, endpoint)
+            response = self._execute(message, 0, self.gemini_api_key, endpoint)
             generated_text.append(response["generated_text"])
         output = generated_text[0]
 
@@ -398,7 +399,7 @@ class LLM:
         indices = []
 
         for _ in range(1):
-            response = self._execute(body, 0, self.api_key, endpoint)
+            response = self._execute(body, 0, self.azure_api_key, endpoint)
             generated_text.append(response["generated_text"])
         output = generated_text[0]
 
