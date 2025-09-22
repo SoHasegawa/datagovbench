@@ -3,7 +3,7 @@
 ## Getting Started
 
 ### Sample Datasets Download
-Please download the datasets from the released page, and extract the zip file.
+Please download the datasets from the supplementary material, and extract the zip file.
 
 ### Environment Setup
 
