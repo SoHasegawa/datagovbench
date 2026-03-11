@@ -1,11 +1,11 @@
-# OpenDataBench: Real-world Benchmark for Table Insight Generation and Question Answering over Open Data
+# DataGovBench
 
 **NOTE: The complete benchmark will be publicly released with the camera-ready version.**
 
 ## Getting Started
 
 ### Preparation of Sample Data
-Please extract the zip file (`opendatabench_sample.zip`).
+Please extract the zip file (`datagovbench_sample.zip`).
 
 ### Environment Setup
 
