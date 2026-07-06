@@ -1,11 +1,5 @@
-import pandas as pd
-import traceback
-import json
-import io
-import contextlib
-
 from src.agent.sequence import sequence_external_knowledge, sequence_qa_pairs, sequence_tables
-    
+
 
 class TableReflectionAgent:
     def __init__(self, model="gpt4", local_llm=False, head_only=False):
@@ -65,24 +59,7 @@ Data source description: {dataset_description}
             prompt += knowledge
             
         return prompt, image_paths
-    
-    def _execute(self, code):
-        output_buffer = io.StringIO()
-        error_buffer = io.StringIO()
 
-        with contextlib.redirect_stdout(output_buffer):
-            with contextlib.redirect_stderr(error_buffer):
-                try:
-                    exec(code, {})
-                except Exception as e:
-                    traceback.print_exc()
-
-        # Display captured output
-        stdout_output = output_buffer.getvalue()
-        stderr_output = error_buffer.getvalue()
-
-        return stdout_output, stderr_output
-    
     def evaluate(self, code, answer, dfs, metadata, data_source, question, external_knowledges=None, previous_qa_pairs=None):
         prompt, image_paths = self._construct_prompt(code, answer, dfs, metadata, data_source, question, external_knowledges, previous_qa_pairs)
         if self.local_llm:

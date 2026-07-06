@@ -3,6 +3,13 @@ from src.fti.fti import fti
 from pandas.api.types import infer_dtype
 
 
+def _ordinal(i):
+    if i == 0: return "1st"
+    if i == 1: return "2nd"
+    if i == 2: return "3rd"
+    return f"{i + 1}th"
+
+
 def to_sequence_descriptive(df):
     feature_type_mapping = {
             0: "Numerical",
@@ -81,10 +88,7 @@ def sequence_tables(dfs, metadata, head_only=False):
         else:
             table_sequence = to_sequence_descriptive(df)
 
-        if i == 0: prefix = "1st table"
-        elif i == 1: prefix = "2nd table"
-        elif i == 2: prefix = "3rd table"
-        else: prefix = f"{i+1}th table"
+        prefix = f"{_ordinal(i)} table"
 
         prompt_for_file = f"""{prefix}
 Dataset title: {file_title}
@@ -136,11 +140,8 @@ def sequence_qa_pairs(qa_pairs):
         if i % 2 == 1:
             if isinstance(qa_pair, list):
                 images = ""
-                for i, qa in enumerate(qa_pair):
-                    if image_num == 0: images += "1st image, "
-                    elif image_num == 1: images += "2nd image, "
-                    elif image_num == 2: images += "3rd image, "
-                    else: images += f"{image_num+1}th image, "
+                for qa in qa_pair:
+                    images += f"{_ordinal(image_num)} image, "
                     image_paths.append(qa)
                     image_num += 1
                 images = images[:-2]

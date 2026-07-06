@@ -1,31 +1,10 @@
-import io
-import contextlib
-import traceback
-import pandas as pd
-
 from src.agent.llm import LLM
+from src.agent.utils import execute_code
 
 
 class VisualizationAgent:
     def __init__(self, model="gpt4"):
         self.llm = model
-
-    def _execute(self, code):
-        output_buffer = io.StringIO()
-        error_buffer = io.StringIO()
-
-        with contextlib.redirect_stdout(output_buffer):
-            with contextlib.redirect_stderr(error_buffer):
-                try:
-                    exec(code, {})
-                except Exception as e:
-                    traceback.print_exc()
-
-        # Display captured output
-        stdout_output = output_buffer.getvalue()
-        stderr_output = error_buffer.getvalue()
-
-        return stdout_output, stderr_output
 
     def evaluate(self, vis_path, code, question):
         prompt = f"""You are a top data analyst with much experience on Python and matplotlib. Given one generated figure that aims to answer the question '{question}', your task is to analyze the figures and judge whether the figures are aligning with the question and human understandable. If it is not, please revise the Python code to generate figure. Please do not include try-except statement. If it is OK, please answer only "OK!" without additional text.
@@ -58,7 +37,7 @@ Here is the code to generate the figure. If you output the revised code, please 
         fail_count = 0
 
         while not judge_result:
-            _, _ = self._execute(code)
+            _, _ = execute_code(code)
             judge_result, code = self.evaluate(vis_path, code, question)
             flows["codes"].append(code)
             flows["judge"].append(judge_result)

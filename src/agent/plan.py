@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.agent.sequence import sequence_tables, sequence_external_knowledge, sequence_qa_pairs, sequence_questions
+from src.agent.sequence import sequence_tables, sequence_external_knowledge, sequence_questions
 from src.agent.utils import json_save
 from src.agent.llm import LLM
 

@@ -1,6 +1,5 @@
 import networkx as nx
 import json
-import matplotlib.pyplot as plt
 
 from pathlib import Path
 from networkx.readwrite import json_graph

@@ -1,5 +1,4 @@
 from src.agent.sequence import sequence_tables, sequence_external_knowledge, sequence_qa_pairs
-from src.agent.llm import LLM
 
 
 class CodeAgent:

@@ -3,8 +3,7 @@ import fitz
 import docx
 import pandas as pd
 
-from trafilatura import html2txt, extract, fetch_url
-from pathlib import Path
+from trafilatura import extract
 from lxml import etree
 
 from src.agent.sequence import to_sequence_descriptive

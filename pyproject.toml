@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "anthropic>=0.40.0",
     "huggingface-hub>=0.34.5",
     "japanese-number-converter>=1.0.1",
     "lightgbm>=4.6.0",

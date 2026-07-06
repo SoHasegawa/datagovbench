@@ -16,6 +16,37 @@ from src.agent.visualization import VisualizationEvaluateAgent
 from src.agent.curator import Curator
 
 
+def _load_dataset(dataset_dir, opener, metadata, data_source, identifier, csv_latin1_fallback=False):
+    distributions = metadata.get("distribution")
+    external_knowledge = metadata.get("external_knowledge")
+
+    dfs = []
+    dataset_paths = []
+
+    for distribution in distributions:
+        try:
+            file_name = distribution["file_name"]
+            dataset_path = f"{dataset_dir}/{data_source}/{identifier}/data/{file_name}"
+            if csv_latin1_fallback:
+                try:
+                    df = pd.read_csv(dataset_path)
+                except Exception:
+                    df = pd.read_csv(dataset_path, encoding="latin-1")
+            else:
+                df = pd.read_csv(dataset_path)
+            dfs.append(df)
+            dataset_paths.append(dataset_path)
+        except Exception as e:
+            print(e)
+
+    knowledge = None
+    if external_knowledge is not None and len(external_knowledge) > 0:
+        knowledge_path = f"{dataset_dir}/{data_source}/{identifier}/data/{external_knowledge[0]}"
+        knowledge = opener(dfs[0], knowledge_path)
+
+    return dfs, dataset_paths, knowledge
+
+
 class QABenchmarkRunner:
     def __init__(self, dataset_dir, output_path, model, code_agent_only=False, table_head_only=False):
         self.question_files = list(Path(dataset_dir).glob("**/**/**/qa_pairs.json"))
@@ -29,29 +60,15 @@ class QABenchmarkRunner:
         self.dataset_dir = dataset_dir
 
     def _load(self, metadata, data_source, identifier):
-        distributions = metadata.get("distribution")
-        external_knowledge = metadata.get("external_knowledge")
+        return _load_dataset(self.dataset_dir, self.opener, metadata, data_source, identifier)
 
-        dfs = []
-        dataset_paths = []
-
-        for distribution in distributions:
-            try:
-                file_name = distribution["file_name"]
-                dataset_path = f"{self.dataset_dir}/{data_source}/{identifier}/data/{file_name}"
-                df = pd.read_csv(dataset_path)
-                dfs.append(df)
-                dataset_paths.append(dataset_path)
-            except Exception as e:
-                print(e)
-
-        knowledge = None
-        if external_knowledge is not None:
-            if len(external_knowledge) > 0:
-                knowledge_path = f"{self.dataset_dir}/{data_source}/{identifier}/data/{external_knowledge[0]}"
-                knowledge = self.opener(dfs[0], knowledge_path)
-
-        return dfs, dataset_paths, knowledge
+    def _resolve_answer_path(self, a):
+        # Some qa_pairs.json files carry a leading dataset-root prefix
+        # (e.g. "opendatabench/...") that would double when joined with --dataset.
+        basename = os.path.basename(os.path.normpath(self.dataset_dir))
+        if a.startswith(basename + "/"):
+            a = a[len(basename) + 1:]
+        return os.path.join(self.dataset_dir, a)
 
     def evaluate(self):
         total = len(self.question_files)
@@ -94,7 +111,7 @@ class QABenchmarkRunner:
                     code = open(f"{code_path}/code_{turn}.py").read()
                     if isinstance(predicted_qa, list) and ".png" in predicted_qa[0]:
                         answer = answers[turn]
-                        answer = [os.path.join(self.dataset_dir, a) for a in answer]
+                        answer = [self._resolve_answer_path(a) for a in answer]
                         target_code = code
                         pred_code = codes[turn]
                         match = self.visualization_evaluator.evaluate(predicted_qa, answer, pred_code, target_code)
@@ -176,33 +193,8 @@ class DIBenchmarkRunner:
         return len(token_integers)
 
     def _load(self, metadata, data_source, identifier):
-        distributions = metadata.get("distribution")
-        external_knowledge = metadata.get("external_knowledge")
+        return _load_dataset(self.dataset_dir, self.opener, metadata, data_source, identifier, csv_latin1_fallback=True)
 
-        dfs = []
-        dataset_paths = []
-
-        for distribution in distributions:
-            try:
-                file_name = distribution["file_name"]
-                dataset_path = f"{self.dataset_dir}/{data_source}/{identifier}/data/{file_name}"
-                try:
-                    df = pd.read_csv(dataset_path)
-                except Exception as e:
-                    df = pd.read_csv(dataset_path, encoding="latin-1")
-                dfs.append(df)
-                dataset_paths.append(dataset_path)
-            except Exception as e:
-                print(e)
-
-        knowledge = None
-        if external_knowledge is not None:
-            if len(external_knowledge) > 0:
-                knowledge_path = f"{self.dataset_dir}/{data_source}/{identifier}/data/{external_knowledge[0]}"
-                knowledge = self.opener(dfs[0], knowledge_path)
-
-        return dfs, dataset_paths, knowledge
-    
     def summarize(self, insights, num_tokens):
         prompt = f"""You are a top data analyst for the tabular data. Your task is to summarize the following insights generated from QA pairs related to tabular data in {num_tokens} tokens. Please summarize so that the summarization covers as diverse topics (e.g. global-to-local) as it can. Following is a list of insights.
 

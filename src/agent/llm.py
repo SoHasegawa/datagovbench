@@ -1,15 +1,15 @@
 import torch
 import os
 import base64
-import time
 import re
-import json
 import requests
-import pandas as pd
 import ast
 import ollama
 
 from PIL import Image
+
+from anthropic import Anthropic
+from openai import OpenAI
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
@@ -23,6 +23,20 @@ from mistral_common.protocol.instruct.messages import (
 from mistral_common.protocol.instruct.request import ChatCompletionRequest
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 from huggingface_hub import hf_hub_download
+
+
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+MODEL_ALIASES = {
+    "gpt4": "gpt-4o",
+    "gpt4-mini": "gpt-4o-mini",
+    "gpt5": "gpt-5.1",
+    "gpt5-mini": "gpt-5-mini",
+    "gemini": "gemini-2.5-flash",
+    "gemini-pro": "gemini-2.5-pro",
+    "claude": "claude-opus-4-7",
+    "claude-sonnet": "claude-sonnet-4-6",
+}
 
 
 class LLM:
@@ -48,12 +62,9 @@ class LLM:
                 self.model, self.tokenizer = self._llm_initialize(method)
             self.multimodal = multimodal
         else:
-            self.azure_api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-            self.gpt4_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-            self.gpt4_mini_endpoint = os.environ.get("AZURE_OPENAI_MINI_ENDPOINT")
             self.gemini_api_key = os.environ.get("GEMINI_API_KEY")
-            self.gemini_endpoint = os.environ.get("GEMINI_ENDPOINT")
-            self.gemini_pro_endpoint = os.environ.get("GEMINI_PRO_ENDPOINT")
+            self._openai_client = None
+            self._anthropic_client = None
 
         self.system_prompt_enable = system_prompt_enable
         self.output_format_conversion = {
@@ -176,34 +187,17 @@ class LLM:
         
         return model, tokenizer, system_prompt
     
-    def _execute(self, data, index, api_key, endpoint):
-        headers = {
-                'Content-type': 'application/json',
-                'api-key': api_key,
-        }
+    @property
+    def openai_client(self):
+        if self._openai_client is None:
+            self._openai_client = OpenAI()
+        return self._openai_client
 
-        generated_text = None
-        limit_count = 0
-
-        while generated_text is None and limit_count < 8:
-            response = requests.post(endpoint,
-                                     headers=headers,
-                                     json=data).json()
-
-            if response.get("choices") is not None:
-                generated_text = response["choices"][0]["message"]["content"]
-            elif response.get("candidates"):
-                generated_text = response["candidates"][0]["content"]["parts"][0]["text"]
-            else:
-                time.sleep(60)
-                limit_count += 1
-
-        response_dict = {
-            "generated_text": generated_text,
-            "index": index
-        }
-
-        return response_dict
+    @property
+    def anthropic_client(self):
+        if self._anthropic_client is None:
+            self._anthropic_client = Anthropic()
+        return self._anthropic_client
 
     def _generate_ovis(self, prompt, image_paths=None):
         if image_paths is not None:
@@ -353,118 +347,134 @@ class LLM:
         
         return outputs[0]["generated_text"][-1]
 
-    def _generate_gemini(self, prompt, image_paths=None, endpoint=None):
-        data = [{"text": prompt}]
+    def _generate_gemini(self, prompt, image_paths=None, model="gemini-2.5-flash"):
+        parts = [{"text": prompt}]
         if image_paths is not None:
             for image_path in image_paths:
                 with open(image_path, "rb") as image_file:
                     d = base64.b64encode(image_file.read()).decode("utf-8")
-                data.append({"inlineData": {"mimeType": "image/jpeg", "data": f"{d}"}})
-        message = {}
-        if self.system_prompt_enable:
-            data_system = {"parts": [{"text": self.system_prompt}]}
-            message["system_instruction"] = data_system
-        message["contents"] = [{"role": "user", "parts": data}]
-        message["generation_config"] = {"temperature": 0.0, "max_output_tokens": 3000, "presence_penalty": 1.0}
+                parts.append({"inlineData": {"mimeType": "image/jpeg", "data": d}})
 
-        generated_text = []
-        indices = []
-
-        for _ in range(1):
-            response = self._execute(message, 0, self.gemini_api_key, endpoint)
-            generated_text.append(response["generated_text"])
-        output = generated_text[0]
-
-        return output
-    
-    def _generate_gpt4(self, prompt, image_paths=None, temperature=0.0, endpoint=None):
-        data = [{"type": "text", "text": prompt}]
-        if image_paths is not None:
-            for image_path in image_paths:
-                with open(image_path, "rb") as image_file:
-                    d = base64.b64encode(image_file.read()).decode("utf-8")
-                data.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{d}"}})
-        if self.system_prompt_enable:
-            message = [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": data}]
-        else:
-            message = [{"role": "user", "content": data}]
         body = {
-            "messages": message,
-            "max_tokens": 4000,
-            "presence_penalty": 1.0,
-            "temperature": temperature
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 8192},
         }
+        if self.system_prompt_enable:
+            body["systemInstruction"] = {"parts": [{"text": self.system_prompt}]}
 
-        generated_text = []
-        indices = []
+        http = requests.post(
+            GEMINI_API_URL.format(model=model),
+            headers={"x-goog-api-key": self.gemini_api_key, "Content-Type": "application/json"},
+            json=body,
+        )
+        if not http.ok:
+            raise RuntimeError(f"Gemini {model} HTTP {http.status_code}: {http.text}")
+        data = http.json()
 
-        for _ in range(1):
-            response = self._execute(body, 0, self.azure_api_key, endpoint)
-            generated_text.append(response["generated_text"])
-        output = generated_text[0]
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise RuntimeError(f"Gemini {model} returned no candidates: {data}")
 
-        return output
+        content_parts = candidates[0].get("content", {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in content_parts)
+        if not text:
+            finish = candidates[0].get("finishReason")
+            raise RuntimeError(f"Gemini {model} returned no text (finishReason={finish}): {data}")
+        return text
+
+    def _generate_gpt4(self, prompt, image_paths=None, temperature=0.0, model="gpt-4o"):
+        content = [{"type": "text", "text": prompt}]
+        if image_paths is not None:
+            for image_path in image_paths:
+                with open(image_path, "rb") as image_file:
+                    d = base64.b64encode(image_file.read()).decode("utf-8")
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{d}"}})
+
+        messages = []
+        if self.system_prompt_enable:
+            messages.append({"role": "system", "content": self.system_prompt})
+        messages.append({"role": "user", "content": content})
+
+        kwargs = {"model": model, "messages": messages}
+        if model.startswith("gpt-5"):
+            kwargs["max_completion_tokens"] = 4000
+        else:
+            kwargs["max_tokens"] = 4000
+            kwargs["presence_penalty"] = 1.0
+            kwargs["temperature"] = temperature
+
+        response = self.openai_client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content
+
+    def _generate_anthropic(self, prompt, image_paths=None, model="claude-opus-4-7"):
+        content = []
+        if image_paths is not None:
+            for image_path in image_paths:
+                with open(image_path, "rb") as image_file:
+                    d = base64.standard_b64encode(image_file.read()).decode("utf-8")
+                media_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+                content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": d},
+                })
+        content.append({"type": "text", "text": prompt})
+
+        kwargs = {
+            "model": model,
+            "max_tokens": 4000,
+            "messages": [{"role": "user", "content": content}],
+        }
+        if self.system_prompt_enable:
+            kwargs["system"] = [{
+                "type": "text",
+                "text": self.system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }]
+
+        response = self.anthropic_client.messages.create(**kwargs)
+        return next((b.text for b in response.content if b.type == "text"), None)
+
+    def _generate(self, prompt, image_paths=None, temperature=0.0):
+        if "/" in self.method:
+            if self.multimodal:
+                return self._generate_qwen_vl(prompt, image_paths=image_paths)
+            if self.ollama:
+                return self._generate_ollama(prompt)
+            if self.mistral:
+                return self._generate_mistral(prompt)
+            if self.gptoss:
+                return self._generate_gptoss(prompt)
+            return self._generate_local_llm(prompt)
+
+        model = MODEL_ALIASES.get(self.method)
+        if self.method in ("gpt4", "gpt4-mini", "gpt5", "gpt5-mini"):
+            return self._generate_gpt4(prompt, image_paths=image_paths, temperature=temperature, model=model)
+        if self.method in ("gemini", "gemini-pro"):
+            return self._generate_gemini(prompt, image_paths=image_paths, model=model)
+        if self.method in ("claude", "claude-sonnet"):
+            return self._generate_anthropic(prompt, image_paths=image_paths, model=model)
 
     def __call__(self, prompt, image_paths=None, temperature=0.0):
-        if "/" in self.method:
-            if self.multimodal:
-                generated_text = self._generate_qwen_vl(prompt, image_paths=image_paths)
-            elif self.ollama:
-                generated_text = self._generate_ollama(prompt)
-            elif self.mistral:
-                generated_text = self._generate_mistral(prompt)
-            elif self.gptoss:
-                generated_text = self._generate_gptoss(prompt)
-            else:
-                generated_text = self._generate_local_llm(prompt)
-        elif self.method == "gpt4":
-            generated_text = self._generate_gpt4(prompt, image_paths=image_paths, temperature=temperature, endpoint=self.gpt4_endpoint)
-        elif self.method == "gpt4-mini":
-            generated_text = self._generate_gpt4(prompt, image_paths=image_paths, temperature=temperature, endpoint=self.gpt4_mini_endpoint)
-        elif self.method == "gemini":
-            generated_text = self._generate_gemini(prompt, image_paths=image_paths, endpoint=self.gemini_endpoint)
-        elif self.method == "gemini-pro":
-            generated_text = self._generate_gemini(prompt, image_paths=image_paths, endpoint=self.gemini_pro_endpoint)
+        return self._generate(prompt, image_paths=image_paths, temperature=temperature)
 
-        return generated_text
-    
     def generate_format(self, prompt, image_paths=None, temperature=0.0, format="code"):
-        if "/" in self.method:
-            if self.multimodal:
-                generated_text = self._generate_qwen_vl(prompt, image_paths=image_paths)
-            elif self.ollama:
-                generated_text = self._generate_ollama(prompt)
-            elif self.mistral:
-                generated_text = self._generate_mistral(prompt)
-            elif self.gptoss:
-                generated_text = self._generate_gptoss(prompt)
-            else:
-                generated_text = self._generate_local_llm(prompt)
-        elif self.method == "gpt4":
-            generated_text = self._generate_gpt4(prompt, image_paths=image_paths, temperature=temperature, endpoint=self.gpt4_endpoint)
-        elif self.method == "gpt4-mini":
-            generated_text = self._generate_gpt4(prompt, image_paths=image_paths, temperature=temperature, endpoint=self.gpt4_mini_endpoint)
-        elif self.method == "gemini":
-            generated_text = self._generate_gemini(prompt, image_paths=image_paths, endpoint=self.gemini_endpoint)
-        elif self.method == "gemini-pro":
-            generated_text = self._generate_gemini(prompt, image_paths=image_paths, endpoint=self.gemini_pro_endpoint)
+        generated_text = self._generate(prompt, image_paths=image_paths, temperature=temperature)
 
         if generated_text is None: return generated_text
         if generated_text.startswith("-") or generated_text == "OK":
             return generated_text
-        
+
         if format == "code":
             generated_text = self._wrap_code(generated_text)
         elif format == "json":
             generated_text = self._wrap_json(generated_text)
 
         return generated_text
-    
-    def ensemble(self, prompt, image_paths=None):
-        results = {}
-        results["gpt4"] = self._wrap_json(self._generate_gpt4(prompt, image_paths=image_paths, endpoint=self.gpt4_endpoint))
-        results["gpt4-mini"] = self._wrap_json(self._generate_gpt4(prompt, image_paths=image_paths, endpoint=self.gpt4_mini_endpoint))
-        results["gemini"] = self._wrap_json(self._generate_gemini(prompt, image_paths=image_paths, endpoint=self.gemini_endpoint))
-        results["gemini-pro"] = self._wrap_json(self._generate_gemini(prompt, image_paths=image_paths, endpoint=self.gemini_pro_endpoint))
 
-        return results
+    def ensemble(self, prompt, image_paths=None):
+        return {
+            alias: self._wrap_json(self._generate_gpt4(prompt, image_paths=image_paths, model=MODEL_ALIASES[alias]))
+            if alias.startswith("gpt")
+            else self._wrap_json(self._generate_gemini(prompt, image_paths=image_paths, model=MODEL_ALIASES[alias]))
+            for alias in ("gpt4", "gpt4-mini", "gemini", "gemini-pro")
+        }

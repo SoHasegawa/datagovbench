@@ -1,13 +1,9 @@
-import pandas as pd
 import re
-import io
-import traceback
-import contextlib
 
 from pathlib import Path
 
 from src.agent.llm import LLM
-from src.agent.utils import json_save, json_read
+from src.agent.utils import execute_code, json_save
 
 from src.agent.visualization import VisualizationAgent
 from src.agent.error_handling import ErrorHandlingAgent
@@ -33,22 +29,6 @@ class QAAgent:
         self.output_dir = f"{output_dir}/answers"
         self.turn = 0
 
-    def _execute(self, code):
-        output_buffer = io.StringIO()
-        error_buffer = io.StringIO()
-
-        with contextlib.redirect_stdout(output_buffer):
-            with contextlib.redirect_stderr(error_buffer):
-                try:
-                    exec(code, {})
-                except Exception as e:
-                    traceback.print_exc()
-
-        stdout_output = output_buffer.getvalue()
-        stderr_output = error_buffer.getvalue()
-
-        return stdout_output, stderr_output
-
     def fill_code(self, code, dataset_paths, output_dir, data_source, dataset_id, question_id, turn):
         for index, dataset_path in enumerate(dataset_paths):
             code = code.replace(f"data_{index+1}.csv", dataset_path)
@@ -66,7 +46,7 @@ class QAAgent:
 
     def sandbox(self, code, dataset_paths, question, output_dir, data_source, dataset_id, question_id, turn, agent_flows=None):
         # Error handling if needed
-        output, error = self._execute(code)
+        output, error = execute_code(code)
         if error != "":
             print(f"ERROR::::::::::::::::::::::::::: {error}")
             code, output, flows = self.error_handling_agent(error, code)
@@ -119,7 +99,7 @@ class QAAgent:
             code = self.code_agent.evaluate(dfs, metadata, data_source, question, external_knowledge, qa_pairs)
             if code is None: return qa_pairs, codes
             code, chart_exist = self.fill_code(code, dataset_paths, self.output_dir, data_source, dataset_id, question_id, turn=turn)
-            output, error = self._execute(code)
+            output, error = execute_code(code)
 
             splits = str(self.output_dir).split("/")
             output_image_dir = "/".join(splits) + f"/{data_source}/{dataset_id}/rank{question_id}/turn{turn}/"
@@ -169,7 +149,7 @@ class QAAgent:
                 # Table reflection agent for non-visualization tasks
                 judge, code = self.reflection_agent.evaluate(code, output, dfs_copy, metadata, data_source, question, external_knowledge, qa_pairs)
                 if not judge:
-                    output, _ = self._execute(code)
+                    output, _ = execute_code(code)
                     agent_flow["reflection_agent"] = {"code": [code], "output": [output]}
 
             qa_pairs.append(question)
